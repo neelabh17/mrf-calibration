@@ -118,3 +118,6 @@ _*
 VOCdevkit/
 eceData/
 curves/
+eval_calib_images/
+eval_crf_images/
+wrongEvals/

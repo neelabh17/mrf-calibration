@@ -22,6 +22,7 @@ from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 from torchnet.meter import MovingAverageValueMeter
 from tqdm import tqdm
+import pickle
 
 from libs.datasets import get_dataset
 from libs.models import DeepLabV2_ResNet101_MSC
@@ -426,6 +427,7 @@ def test(config_path, model_path, cuda):
     ece_folder="eceData"
     makedirs(ece_folder)
 
+    # postfix="DLV2_UnCal"
     postfix="DLV2_TempCal"
     saveDir=os.path.join(ece_folder,postfix)
     makedirs(saveDir)
@@ -528,23 +530,49 @@ def crf(config_path, n_jobs):
         _, H, W = image.shape
         logit = torch.FloatTensor(logit)[None, ...]
         logit = F.interpolate(logit, size=(H, W), mode="bilinear", align_corners=False)
-        # Temperature scaling the factor of 1.2367 was precalculated 
         
-        logit=logit/1.2367
+        # Temperature scaling the factor of 1.2367 was precalculated 
+        # T=1.2367
+        T=1
+        logit=logit/T
 
         prob = F.softmax(logit, dim=1)[0].numpy()
         image = image.astype(np.uint8).transpose(1, 2, 0)
         prob = postprocessor(image, prob)
-        label = np.argmax(prob, axis=0)
 
-        return label, gt_label
+
+        # gt_tensor = torch.tensor(gt_label).unsqueeze(0)
+        # prob2 = torch.FloatTensor(prob).unsqueeze(0)
+
+        # # print('gt_tensor shape : ', gt_tensor.shape)
+        # # print('prob shape : ', prob.shape)
+
+        # # find cross-entrpoy loss
+        # crit = torch.nn.CrossEntropyLoss(ignore_index=255)
+        # loss = crit(prob2,gt_tensor).item()
+
+        label = np.argmax(prob, axis=0)
+        mask = (label == gt_label)
+        correct = mask.sum()
+        total = mask.shape[0] * mask.shape[1]
+        acc = correct / total
+                    
+
+        return label, gt_label, [image_id, acc]
 
     # CRF in multi-process
     results = joblib.Parallel(n_jobs=n_jobs, verbose=10, pre_dispatch="all")(
         [joblib.delayed(process)(i) for i in range(len(dataset))]
     )
 
-    preds, gts = zip(*results)
+    preds, gts , ids_and_losses = zip(*results)
+
+
+    file=open("uncal_acc.pickle","wb")
+    pickle.dump(ids_and_losses,file)
+    file.close()
+
+    
 
     # Pixel Accuracy, Mean Accuracy, Class IoU, Mean IoU, Freq Weighted IoU
     score = scores(gts, preds, n_class=CONFIG.DATASET.N_CLASSES)
